@@ -1,14 +1,15 @@
-import request, { Headers } from 'request';
-import util from 'util';
+import requestWithCallback, { Headers } from 'request';
+import util, { promisify } from 'util';
 import { log } from './logger';
+
+const request = promisify(requestWithCallback);
 
 interface ErrorValue {
   error: string;
   message: string;
 }
 
-//eslint-disable-next-line @typescript-eslint/no-explicit-any
-function isError(value: any): value is ErrorValue {
+function isError(value: unknown): value is ErrorValue {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -30,40 +31,17 @@ async function sendRequest<T>(
     }`
   );
 
-  const value = await new Promise<T>((resolve, reject) => {
-    const json = Buffer.from(body ? JSON.stringify(body) : '', 'utf8');
-    const hasContent = !!json.length;
-    request(
-      {
-        url,
-        method,
-        headers: {
-          ...headers,
-          // This can be removed in favour of using `json` property if https://github.com/SeleniumHQ/selenium/issues/7986 is resolved
-          ...(hasContent && {
-            'Content-Type': 'text/plain;charset=UTF-8',
-            'Content-Length': json.length
-          })
-        },
-        ...(hasContent && { body: json })
-      },
-      (error: Error, _response, body) => {
-        if (error) {
-          reject(error);
-          return;
-        }
+  const { body: result } = (await request({
+    url,
+    method,
+    json: true,
+    ...(headers && { headers }),
+    ...(body && { body }),
+  })) as { body: { value: T } };
 
-        try {
-          const result = JSON.parse(body) as { value: T };
-          log(`WebDriver response: ${util.inspect(result, false, 10)}`);
-          resolve(result.value);
-        } catch (e) {
-          /* istanbul ignore next */
-          reject(body);
-        }
-      }
-    );
-  });
+  log(`WebDriver response: ${util.inspect(result, false, 10)}`);
+
+  const { value } = result;
 
   if (isError(value)) {
     const { error, message } = value;
